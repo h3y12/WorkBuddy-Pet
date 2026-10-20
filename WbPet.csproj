@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>false</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>WbPet</AssemblyName>
+    <RootNamespace>WbPet</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\pet.ico</ApplicationIcon>
+    <NoWarn>$(NoWarn);WFAC010;WFO0003</NoWarn>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\pet.ico" />
+    <Resource Include="Assets\mascot.png" />
+    <Resource Include="Assets\mascot.local.png" Condition="Exists('Assets\mascot.local.png')" />
+  </ItemGroup>
+
+</Project>

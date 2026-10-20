@@ -1,0 +1,13 @@
+# 构建产物
+bin/
+obj/
+dist/
+_verify/
+
+# 本地私人素材：WorkBuddy 官方形象，版权不在本项目
+Assets/mascot.local.png
+
+# IDE
+.vs/
+*.user
+*.suo
