@@ -14,7 +14,7 @@ spec.loader.exec_module(c)
 
 class CollectorTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="wb-pet-tests-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="wb-pet-tests-", ignore_cleanup_errors=True)
         self.root = Path(self.tmp.name)
         c.DB_PATH = self.root / "with space # 中文.db"
         c.OUT_DIR = self.root
