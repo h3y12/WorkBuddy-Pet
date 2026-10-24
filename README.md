@@ -59,6 +59,16 @@ publish.cmd framework       :: 输出 dist\framework，目标机器需要 .NET D
 publish.cmd self-contained  :: 输出 dist\self-contained，带 .NET 运行时，首次构建可能需联网还原
 ```
 
+### 发布包（CI 构建）
+
+`.github/workflows/build.yml` 在 `windows-latest` 上跑 Python 回归、WPF smoke、net10 自包含发布，
+再下载官方 embeddable Python 3.13 放进 `python\`，用包内解释器实际执行 `import sqlite3` 校验，最后打包上传 artifact。
+
+包内只有：`WbPet.exe`、`collector.py`、`python\`、许可与说明；不含本机数据库、缓存、任务数据和第三方形象素材。
+
+Windows 10 上必须保留 `<CetCompat>false</CetCompat>`：.NET 10 的 apphost 默认带 CET 标记，
+在未打全补丁的 Win10 上启动即崩。自包含只带运行时，不改变操作系统的兼容性要求。
+
 ## 跑起来
 
 从发布目录运行 `WbPet.exe`。分发时复制/压缩**整个发布目录**，包含 `collector.py` 和许可文件，不能只发 EXE。
