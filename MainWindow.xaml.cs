@@ -31,8 +31,13 @@ namespace WbPet
         private static Stream? _trayIconStream;
         private long _lastEventSeq = -1;
         private DateTime _doneUntil = DateTime.MinValue;
+        private bool _eventIsError;
+        private string _eventTitle = "";
         private string _stateName = "";
         private DateTime _lastStateWrite = DateTime.MinValue;
+        private DateTime _lastCollectorAttempt = DateTime.MinValue;
+        private Process? _collector;
+        private string _collectorError = "";
 
         private DateTime _lastProcCheck = DateTime.MinValue;
         private DateTime _graceUntil = DateTime.MinValue;
@@ -48,7 +53,7 @@ namespace WbPet
 
         public MainWindow() : this(false) { }
 
-        public MainWindow(bool headless)
+        public MainWindow(bool headless, string? statePath = null)
         {
             _headless = headless;
             InitializeComponent();
@@ -57,7 +62,7 @@ namespace WbPet
             _watchWorkBuddy = !headless &&
                               !Environment.GetCommandLineArgs().Contains("--stay", StringComparer.OrdinalIgnoreCase);
 
-            _statePath = Path.Combine(
+            _statePath = statePath ?? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "WbPet", "state.json");
             _configPath = Path.Combine(
@@ -78,6 +83,11 @@ namespace WbPet
             Root.MouseLeftButtonDown += Root_MouseLeftButtonDown;
             Loaded += OnWindowLoaded;
             Closed += OnWindowClosed;
+            IsVisibleChanged += (_, _) =>
+            {
+                if (_headless) return;
+                if (IsVisible) ApplyPose(_stateName); else StopAnimations();
+            };
 
             _timer = new DispatcherTimer(DispatcherPriority.Background)
             {
@@ -97,8 +107,8 @@ namespace WbPet
         {
             foreach (var uri in new[]
                      {
-                         "pack://application:,,,/Assets/mascot.local.png",
-                         "pack://application:,,,/Assets/mascot.png"
+                         "pack://application:,,,/WbPet;component/Assets/mascot.local.png",
+                         "pack://application:,,,/WbPet;component/Assets/mascot.png"
                      })
             {
                 try
@@ -167,32 +177,41 @@ namespace WbPet
         /// <summary>采集器没在跑（state.json 太旧）就顺手拉起来；单例端口保证不会重复。</summary>
         private void EnsureCollector()
         {
+            if (_headless || DateTime.UtcNow - _lastCollectorAttempt < TimeSpan.FromSeconds(15)) return;
+            _lastCollectorAttempt = DateTime.UtcNow;
             try
             {
                 if (File.Exists(_statePath) &&
                     DateTime.UtcNow - File.GetLastWriteTimeUtc(_statePath) < TimeSpan.FromSeconds(6))
                     return;
+                if (_collector != null && !_collector.HasExited) return;
+                _collector?.Dispose();
+                _collector = null;
 
                 var script = FindCollectorScript();
-                if (script == null) { Log("找不到 collector.py"); return; }
+                if (script == null) { _collectorError = "发布目录缺少 collector.py，请完整解压程序包"; Log(_collectorError); return; }
 
                 var pythonw = FindPythonw();
-                if (pythonw == null) { Log("PATH 里找不到 pythonw.exe"); return; }
+                if (pythonw == null) { _collectorError = "需要 Python 3.10+；请设置 WBPET_PYTHON 或提供 python\\pythonw.exe"; Log(_collectorError); return; }
 
                 var psi = new ProcessStartInfo
                 {
                     FileName = pythonw,
-                    Arguments = "\"" + script + "\" --parent " + Environment.ProcessId,
                     WorkingDirectory = Path.GetDirectoryName(script)!,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
-                var proc = Process.Start(psi);
-                Log($"拉起采集器 pid={proc?.Id} pythonw={pythonw}");
+                psi.ArgumentList.Add(script);
+                psi.ArgumentList.Add("--parent");
+                psi.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+                _collector = Process.Start(psi);
+                _collectorError = "";
+                Log($"拉起采集器 pid={_collector?.Id} python={pythonw}");
             }
             catch (Exception ex)
             {
+                _collectorError = "采集器启动失败，详情见 pet.log";
                 Log("拉起采集器失败: " + ex.Message);
             }
         }
@@ -269,26 +288,39 @@ namespace WbPet
 
         private static string? FindPythonw()
         {
-            const string name = "pythonw.exe";
+            var configured = Environment.GetEnvironmentVariable("WBPET_PYTHON");
+            if (!string.IsNullOrWhiteSpace(configured))
+                return File.Exists(configured) ? Path.GetFullPath(configured) : null;
+            foreach (var name in new[] { "pythonw.exe", "python.exe" })
+            {
+                var bundled = Path.Combine(AppContext.BaseDirectory, "python", name);
+                if (File.Exists(bundled)) return bundled;
+            }
             foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "")
                      .Split(';', StringSplitOptions.RemoveEmptyEntries))
             {
-                try
+                foreach (var name in new[] { "pythonw.exe", "python.exe" })
                 {
-                    var p = Path.Combine(dir.Trim('"').Trim(), name);
-                    if (File.Exists(p)) return p;
+                    try
+                    {
+                        var p = Path.Combine(dir.Trim('"').Trim(), name);
+                        if (File.Exists(p)) return p;
+                    }
+                    catch { }
                 }
-                catch { }
             }
+            const string fallbackName = "pythonw.exe";
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             var candidates = new[]
             {
-                Path.Combine(local, "Programs", "Python", "Python313", name),
-                Path.Combine(local, "Programs", "Python", "Python312", name),
-                Path.Combine(local, "Programs", "Python", "Python311", name),
-                @"C:\Python313\" + name,
-                @"C:\Python312\" + name,
-                @"C:\ProgramData\anaconda3\" + name,
+                Path.Combine(local, "Programs", "Python", "Python314", fallbackName),
+                Path.Combine(local, "Programs", "Python", "Python313", fallbackName),
+                Path.Combine(local, "Programs", "Python", "Python312", fallbackName),
+                Path.Combine(local, "Programs", "Python", "Python311", fallbackName),
+                Path.Combine(local, "Programs", "Python", "Python310", fallbackName),
+                @"C:\Python313\" + fallbackName,
+                @"C:\Python312\" + fallbackName,
+                @"C:\ProgramData\anaconda3\" + fallbackName,
             };
             foreach (var c in candidates) if (File.Exists(c)) return c;
             return null;
@@ -345,7 +377,7 @@ namespace WbPet
         {
             try
             {
-                var res = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/pet.ico"));
+                var res = Application.GetResourceStream(new Uri("pack://application:,,,/WbPet;component/Assets/pet.ico"));
                 Drawing.Icon icon;
                 if (res != null)
                 {
@@ -399,12 +431,15 @@ namespace WbPet
             SaveConfig();
             _tray?.Dispose();
             _timer.Stop();
+            StopAnimations();
+            _collector?.Dispose(); // Python 自己检测父进程退出，不终止其他实例的采集器。
         }
 
         // ---------------- 主循环 ----------------
 
         private void Tick()
         {
+            EnsureCollector();
             // 生命周期：WorkBuddy 关掉后跟着退（约 6 秒宽限，够它重启）
             if (_watchWorkBuddy && (DateTime.Now - _lastProcCheck).TotalSeconds >= 2)
             {
@@ -420,8 +455,9 @@ namespace WbPet
                 }
             }
 
-            if (DateTime.Now > _doneUntil && _stateName == "done")
+            if (_doneUntil != DateTime.MinValue && DateTime.Now > _doneUntil)
             {
+                _doneUntil = DateTime.MinValue;
                 _stateName = "";
                 _lastStateWrite = DateTime.MinValue;
             }
@@ -432,7 +468,9 @@ namespace WbPet
         {
             try
             {
-                return Process.GetProcessesByName("WorkBuddy").Length > 0;
+                var processes = Process.GetProcessesByName("WorkBuddy");
+                try { return processes.Length > 0; }
+                finally { foreach (var process in processes) process.Dispose(); }
             }
             catch
             {
@@ -443,19 +481,26 @@ namespace WbPet
         private void PollState()
         {
             string text;
+            DateTime stateWrite;
             try
             {
                 if (!File.Exists(_statePath))
                 {
-                    SetState("offline", "等待采集器", "", "", 0);
+                    SetState("offline", "等待采集器", _collectorError, "", 0);
                     return;
                 }
-                if (File.GetLastWriteTimeUtc(_statePath) == _lastStateWrite) return;
+                stateWrite = File.GetLastWriteTimeUtc(_statePath);
+                if (DateTime.UtcNow - stateWrite > TimeSpan.FromSeconds(10))
+                {
+                    ShowUnavailable("采集器超过 10 秒没有更新，正在等待恢复");
+                    return;
+                }
+                if (stateWrite == _lastStateWrite) return;
                 text = File.ReadAllText(_statePath);
-                _lastStateWrite = File.GetLastWriteTimeUtc(_statePath);
             }
-            catch
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
+                ShowUnavailable("状态文件暂时无法读取，下一轮会重试");
                 return;
             }
 
@@ -463,20 +508,21 @@ namespace WbPet
             {
                 using var doc = JsonDocument.Parse(text);
                 var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object)
+                    throw new JsonException("State must be an object");
 
                 // 采集器出错时只会留下 stale 标记，这时不要臆断 WorkBuddy 是否在运行
-                if (root.TryGetProperty("error", out _) &&
-                    !root.TryGetProperty("app_running", out _))
+                if (root.TryGetProperty("error", out _) ||
+                    (root.TryGetProperty("stale", out var stale) && stale.ValueKind == JsonValueKind.True) ||
+                    (root.TryGetProperty("db_ok", out var dbOk) && dbOk.ValueKind == JsonValueKind.False))
                 {
-                    SetState("offline", "读数暂时中断", "采集器读不到 workbuddy.db", "", 0);
-                    UsageText.Visibility = Visibility.Collapsed;
-                    UsageCol.Width = new GridLength(0);
-                    RestCol.Width = new GridLength(1, GridUnitType.Star);
+                    ShowUnavailable("采集器读不到有效数据库，显示已暂停；详情见 pet.log / state.json");
                     return;
                 }
 
                 bool running = root.TryGetProperty("app_running", out var ar) &&
                                ar.ValueKind == JsonValueKind.True;
+                bool celebrate = false;
 
                 double used = 0, size = 0, creditsToday = 0, creditsSession = 0;
                 string creditsSince = "";
@@ -495,10 +541,12 @@ namespace WbPet
                     long seq = (long)Num(ev, "seq");
                     if (seq > _lastEventSeq && _lastEventSeq >= 0)
                     {
+                        _eventIsError = Str(ev, "type") == "error";
+                        _eventTitle = Str(ev, "title");
                         _doneUntil = DateTime.Now.AddSeconds(8);
                         _stateName = "";
                         _lastStateWrite = DateTime.MinValue;
-                        PlayCelebrate();
+                        celebrate = !_eventIsError;
                         Notify(ev);
                     }
                     if (seq > _lastEventSeq) _lastEventSeq = seq;
@@ -547,6 +595,7 @@ namespace WbPet
                 string tip = $"本会话 {used:N0} / {size:N0} tokens；会话累计 {creditsSession:0.##} 积分"
                              + (string.IsNullOrEmpty(creditsSince) ? "" : $"；已观测到使用自 {creditsSince} 起累计");
                 double ratio = used / Math.Max(size, 1);
+                _lastStateWrite = stateWrite; // 仅在完整解析成功后提交，坏 JSON 下一轮还会重试。
 
                 if (pendingCount > 0)
                 {
@@ -558,7 +607,10 @@ namespace WbPet
                 }
                 else if (DateTime.Now <= _doneUntil)
                 {
-                    SetState("done", "✓ 任务完成", title, usage, ratio, tip, "✓", DoneBrush, parallel);
+                    SetState(_eventIsError ? "error" : "done", _eventIsError ? "任务出错" : "✓ 任务完成",
+                             _eventTitle, usage, ratio, tip, _eventIsError ? "!" : "✓",
+                             _eventIsError ? ErrorBrush : DoneBrush, parallel);
+                    if (celebrate && IsVisible && SystemParameters.ClientAreaAnimation) PlayCelebrate();
                 }
                 else if (status == "working")
                 {
@@ -579,10 +631,18 @@ namespace WbPet
                              title.Length > 0 ? "上次：" + title : "", usage, ratio, tip, "", null, parallel);
                 }
             }
-            catch (JsonException)
+            catch (Exception ex) when (ex is JsonException || ex is InvalidOperationException ||
+                                       ex is FormatException || ex is OverflowException)
             {
-                // 半行/写坏，忽略这一轮
+                ShowUnavailable("采集数据暂时无法解析，下一轮会重试");
             }
+        }
+
+        private void ShowUnavailable(string detail)
+        {
+            _doneUntil = DateTime.MinValue;
+            _lastStateWrite = DateTime.MinValue;
+            SetState("offline", "读数暂时中断", detail, "", 0);
         }
 
         private static string Str(JsonElement e, string name) =>
@@ -663,7 +723,7 @@ namespace WbPet
                 _ => new SolidColorBrush(Color.FromRgb(0x7C, 0x8B, 0x9A))
             };
 
-            if (!string.IsNullOrEmpty(tip)) ToolTip = tip;
+            ToolTip = string.IsNullOrEmpty(tip) ? null : tip;
 
             bool showBadge = !string.IsNullOrEmpty(badge) && badgeBrush != null;
             Badge.Visibility = showBadge ? Visibility.Visible : Visibility.Collapsed;
@@ -680,6 +740,11 @@ namespace WbPet
 
         private void ApplyPose(string name)
         {
+            if ((!_headless && !IsVisible) || !SystemParameters.ClientAreaAnimation)
+            {
+                StopAnimations();
+                return;
+            }
             bool working = name == "working";
             Dots.Visibility = working ? Visibility.Visible : Visibility.Collapsed;
             if (working) StartDots(); else StopDots();
@@ -709,6 +774,19 @@ namespace WbPet
             }
         }
 
+        private void StopAnimations()
+        {
+            StopDots();
+            BodyScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            BodyScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            BodyShift.BeginAnimation(TranslateTransform.YProperty, null);
+            Shadow.BeginAnimation(OpacityProperty, null);
+            BodyScale.ScaleX = BodyScale.ScaleY = 1;
+            BodyShift.Y = 0;
+            Shadow.Opacity = 1;
+            Dots.Visibility = Visibility.Collapsed;
+        }
+
         private void StartBreathe(double from, double to, double seconds)
         {
             var ease = new SineEase { EasingMode = EasingMode.EaseInOut };
@@ -716,6 +794,8 @@ namespace WbPet
             { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease };
             var sx = new DoubleAnimation(from, 1 - (to - from) * 0.4, TimeSpan.FromSeconds(seconds))
             { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease };
+            Timeline.SetDesiredFrameRate(sy, 20);
+            Timeline.SetDesiredFrameRate(sx, 20);
             BodyScale.BeginAnimation(ScaleTransform.ScaleYProperty, sy);
             BodyScale.BeginAnimation(ScaleTransform.ScaleXProperty, sx);
         }
@@ -733,10 +813,12 @@ namespace WbPet
             var ease = new SineEase { EasingMode = EasingMode.EaseInOut };
             var bob = new DoubleAnimation(0, amplitude, TimeSpan.FromSeconds(seconds))
             { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease };
+            Timeline.SetDesiredFrameRate(bob, 20);
             BodyShift.BeginAnimation(TranslateTransform.YProperty, bob);
 
             var shadow = new DoubleAnimation(1.0, 0.7, TimeSpan.FromSeconds(seconds))
             { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease };
+            Timeline.SetDesiredFrameRate(shadow, 20);
             Shadow.BeginAnimation(OpacityProperty, shadow);
         }
 
@@ -751,6 +833,7 @@ namespace WbPet
                     RepeatBehavior = RepeatBehavior.Forever,
                     BeginTime = TimeSpan.FromMilliseconds(i * 160)
                 };
+                Timeline.SetDesiredFrameRate(anim, 20);
                 els[i].BeginAnimation(OpacityProperty, anim);
             }
         }

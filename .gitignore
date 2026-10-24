@@ -11,3 +11,5 @@ Assets/mascot.local.png
 .vs/
 *.user
 *.suo
+__pycache__/
+*.pyc

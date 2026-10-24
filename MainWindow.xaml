@@ -9,7 +9,7 @@
         ShowInTaskbar="False"
         Topmost="True"
         ResizeMode="NoResize"
-        Icon="/Assets/pet.ico"
+        Icon="/WbPet;component/Assets/pet.ico"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         FontFamily="Microsoft YaHei UI, Segoe UI">

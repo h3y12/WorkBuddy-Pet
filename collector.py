@@ -45,15 +45,15 @@ STATUS_MAP = {
 
 
 def _ro_connect(path: Path) -> sqlite3.Connection:
-    """只读打开；WAL 模式下如果 ro 打不开就退回普通连接并设 query_only。"""
+    """始终以只读 URI 打开；失败就报告中断，不退回可写连接。"""
+    conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=2.0)
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
+        conn.execute("PRAGMA query_only=ON")
         conn.execute("select 1 from sessions limit 1")
         return conn
-    except sqlite3.Error:
-        conn = sqlite3.connect(str(path), timeout=2.0)
-        conn.execute("PRAGMA query_only=ON")
-        return conn
+    except BaseException:
+        conn.close()
+        raise
 
 
 def _load_cache() -> dict:
@@ -65,8 +65,11 @@ def _load_cache() -> dict:
 
 def _save_cache(cache: dict) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    content = json.dumps(cache, ensure_ascii=False)
+    if CACHE_PATH.exists() and CACHE_PATH.read_text(encoding="utf-8") == content:
+        return
     tmp = CACHE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    tmp.write_text(content, encoding="utf-8")
     os.replace(tmp, CACHE_PATH)
 
 
@@ -198,9 +201,11 @@ def update_daily_credits(totals: dict[str, float]) -> tuple[float, str]:
 
     try:
         CREDITS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = CREDITS_PATH.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, CREDITS_PATH)
+        content = json.dumps(state, ensure_ascii=False)
+        if not CREDITS_PATH.exists() or CREDITS_PATH.read_text(encoding="utf-8") != content:
+            tmp = CREDITS_PATH.with_suffix(".tmp")
+            tmp.write_text(content, encoding="utf-8")
+            os.replace(tmp, CREDITS_PATH)
     except Exception:
         pass
     return round(float(state.get("today", 0) or 0), 2), str(state.get("since", ""))
@@ -226,9 +231,12 @@ def collect(pid_running: bool = True) -> dict:
     usage_by_id: dict[str, dict] = {}
     event = None
 
+    if not DB_PATH.is_file():
+        raise FileNotFoundError("WorkBuddy database is not available")
     if DB_PATH.exists():
         conn = _ro_connect(DB_PATH)
         try:
+            conn.execute("BEGIN")  # sessions 与 usage 使用同一个只读快照。
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -291,6 +299,10 @@ def collect(pid_running: bool = True) -> dict:
         event["seq"] = seq
     cache["statuses"] = statuses
     cache["seq"] = seq
+    if event is not None:
+        cache["event"] = event
+    else:
+        event = cache.get("event")  # 保留序号，避免 UI 错过两次轮询之间的事件。
     try:
         _save_cache(cache)
     except Exception:
@@ -351,7 +363,14 @@ def _processes() -> dict[int, str]:
         ]
 
     kernel32 = ctypes.windll.kernel32
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
     kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
     snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
     if snap == wintypes.HANDLE(-1).value:
         return {}
@@ -401,6 +420,8 @@ def main() -> int:
     ap.add_argument("--interval", type=float, default=0.8)
     ap.add_argument("--parent", type=int, default=0, help="桌宠进程 PID；它退出后采集器也退出")
     args = ap.parse_args()
+    if not 0.2 <= args.interval <= 60:
+        ap.error("--interval must be between 0.2 and 60 seconds")
 
     global OUT_PATH
     OUT_PATH = Path(args.out) if args.out else OUT_PATH

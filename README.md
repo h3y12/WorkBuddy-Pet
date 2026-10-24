@@ -10,7 +10,7 @@
 ## 数据从哪来
 
 WorkBuddy 把会话状态和用量存在本地 SQLite：`%USERPROFILE%\.workbuddy\workbuddy.db`（WAL 模式）。
-采集器**只读**打开（`mode=ro` + `PRAGMA query_only`），不改数据、不联网。
+采集器**只读**打开（`mode=ro` + `PRAGMA query_only`），不改业务数据、不联网。只读打开失败时直接报告中断，不退回可写连接；路径中的空格、中文和 `#` 会通过文件 URI 正确编码。
 
 | 界面上的东西 | 来源 | 说明 |
 |---|---|---|
@@ -50,28 +50,32 @@ WorkBuddy 不把待确认状态写进 `workbuddy.db`，但会在 `~/.workbuddy/a
 
 ## 构建
 
-需要 .NET 8 SDK（或 .NET 8 Desktop Runtime 跑发布版）与 Python 3（采集器用，无第三方包）。
+当前目标框架是 **.NET 10（net10.0-windows）**，构建需要 .NET 10 SDK。SDK 不一定要装到系统目录，设 `DOTNET_ROOT` 指向解压目录即可，`publish.cmd` 会优先用它。
+self-contained 版自带 .NET 运行时，目标机器不需要装 Desktop Runtime；framework 版需要 .NET 10 Desktop Runtime x64。采集器需要 Python 3.10+（可用随包携带的 embeddable Python，见下）。
 
 ```bat
 dotnet build -c Release
-publish.cmd            :: 生成单文件 dist\WbPet.exe
+publish.cmd framework       :: 输出 dist\framework，目标机器需要 .NET Desktop Runtime
+publish.cmd self-contained  :: 输出 dist\self-contained，带 .NET 运行时，首次构建可能需联网还原
 ```
 
 ## 跑起来
 
-项目在 `E://codes//wb-pet`。桌面快捷方式「WorkBuddy 桌宠」指向 `dist\WbPet.exe`；
-快捷方式丢了可以重建：`dist\WbPet.exe --shortcut`。
+从发布目录运行 `WbPet.exe`。分发时复制/压缩**整个发布目录**，包含 `collector.py` 和许可文件，不能只发 EXE。
+快捷方式可在发布目录运行 `WbPet.exe --shortcut` 创建；移动发布目录后需要重新创建。
+
+两个发布模式都仍需 Python。解释器查找顺序是：`WBPET_PYTHON` 环境变量指定的路径 → EXE 同目录的 `python\pythonw.exe` / `python.exe` → PATH → 常见安装目录。设置了 `WBPET_PYTHON` 却指向不存在文件时不会悄悄改用其他解释器。要制作免安装包，可在 `python\` 放置官方 Windows embeddable Python 完整目录（需要包含 sqlite3 支持），并在干净 Windows 环境验证。self-contained 只解决 .NET，不会自动打包 Python。
 
 ```bat
 :: 双击即可，采集器会自动拉起（单例端口 51927 防重复）
-dist\WbPet.exe
+dist\framework\WbPet.exe
 
 :: 源码运行
 dotnet build -c Release
-bin\Release\net8.0-windows\WbPet.exe
+bin\Release\net10.0-windows\WbPet.exe
 
 :: 调试时不想让它跟着 WorkBuddy 退出
-dist\WbPet.exe --stay
+dist\framework\WbPet.exe --stay
 
 :: 只跑采集器看输出
 python collector.py --once
@@ -81,7 +85,10 @@ python collector.py --once
 - 右键：收起面板、**设置…**（字号 / 面板不透明度 / 角色大小）、
   启动时拉起 WorkBuddy、总在最前、隐藏到托盘、退出
 - 托盘图标：双击显示/隐藏；右键退出
-- `WbPet.exe --snapshot out.png`：不开窗口，把四种状态渲染成一张对照图（自检用）
+- `WbPet.exe --snapshot out.png`：不开窗口，把五种状态渲染成一张对照图（自检用）
+- 状态文件超过 10 秒未更新、标记 stale、数据库不可用或 JSON 解析失败时显示「读数暂时中断」，不继续把旧数据显示为正在工作。
+- 采集器启动会限频重试（每 15 秒最多一次），不会重复拉起仍存活的自有采集器；缺脚本或解释器时显示诊断信息。
+- 隐藏到托盘时停止持续动画，显示后恢复；遵循系统动画开关，呼吸、浮动和思考点的目标帧率设为 20。
 
 ## 生命周期
 
@@ -99,12 +106,12 @@ python collector.py --once
 
 ```
 collector.py        采集器：读 workbuddy.db → state.json（无第三方依赖）
-WbPet.csproj        net8.0-windows + WPF + WinForms（托盘）
+WbPet.csproj        net10.0-windows + WPF + WinForms（托盘）
 MainWindow.xaml     形象、气泡、徽标、思考点的全部布局
 MainWindow.xaml.cs  轮询状态、切姿态、托盘、拖动、生命周期、配置
 ShortcutHelper.cs   生成桌面快捷方式（--shortcut）
 SnapshotRunner.cs   离屏渲染各状态，交付前肉眼验收
-Assets/mascot.png   WorkBuddy 官方形象（129×129，来自 mascot-new）
+Assets/mascot.png   中性占位形象（官方形象放 mascot.local.png，不进仓库）
 Assets/pet.ico      托盘/程序图标（多尺寸）
 ```
 
@@ -137,3 +144,15 @@ Assets/pet.ico      托盘/程序图标（多尺寸）
 
 窗口用 `SizeToContent="WidthAndHeight"`，字号调大后窗口自己会长大，
 不会再有「大号时右边被裁掉」的问题；进度条也改成按比例分列，不写死像素。
+
+## 回归验证
+
+以下测试仅使用临时模拟数据库和模拟状态，不需要 WorkBuddy 登录，不写入真实数据库：
+
+```bat
+python -m unittest discover -s tests -p test_collector.py -v
+dotnet build tests\WbPet.SmokeTests.csproj -c Release -o _verify\smoke
+dotnet _verify\smoke\WbPet.SmokeTests.dll
+```
+
+Python 测试覆盖只读连接、特殊字符路径、数据库缺失、事件保留、错误事件、积分增量和审批日志；界面检查覆盖过期心跳、stale、坏 JSON、恢复、错误/完成区分。真实 WorkBuddy 未来升级后的字段兼容性，以及跨设备、多显示器、安装分发，仍需单独验收。

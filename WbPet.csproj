@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>false</ImplicitUsings>
@@ -13,9 +13,14 @@
     <ApplicationIcon>Assets\pet.ico</ApplicationIcon>
     <NoWarn>$(NoWarn);WFAC010;WFO0003</NoWarn>
     <Version>0.1.0</Version>
+    <!-- .NET 10 的 apphost 默认带 CET 标记，Win10 上会直接崩；关掉它以兼容 Win10 目标机 -->
+    <CetCompat>false</CetCompat>
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="tests\**\*.cs" />
+    <None Update="collector.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Update="README.md;LICENSE;NOTICE.md" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <Resource Include="Assets\pet.ico" />
     <Resource Include="Assets\mascot.png" />
     <Resource Include="Assets\mascot.local.png" Condition="Exists('Assets\mascot.local.png')" />

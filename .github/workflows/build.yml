@@ -1,0 +1,77 @@
+name: build-win-x64
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Collector regression (synthetic DB)
+        run: python -m unittest discover -s tests -p test_collector.py -v
+
+      - name: WPF smoke tests
+        shell: pwsh
+        run: |
+          dotnet build tests/WbPet.SmokeTests.csproj -c Release -o smoke -v minimal
+          dotnet smoke/WbPet.SmokeTests.dll
+
+      - name: Publish self-contained
+        run: >
+          dotnet publish WbPet.csproj -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:DebugType=none -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:CetCompat=false -o out -v minimal
+
+      - name: Bundle embeddable Python and verify sqlite3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = '3.13.7'
+          $url = "https://www.python.org/ftp/python/$ver/python-$ver-embed-amd64.zip"
+          Invoke-WebRequest -Uri $url -OutFile python-embed.zip
+          Expand-Archive python-embed.zip -DestinationPath out/python -Force
+          $py = Join-Path $PWD 'out/python/python.exe'
+          if (-not (Test-Path $py)) { throw "python.exe missing after extraction" }
+          & $py -c "import sqlite3, sys; print('python', sys.version); print('sqlite3', sqlite3.sqlite_version)"
+          if ($LASTEXITCODE -ne 0) { throw "bundled python cannot import sqlite3" }
+
+      - name: Assemble package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = 'WbPet-0.1.0-win-x64'
+          $pkg = Join-Path $PWD "pkg/$name"
+          New-Item -ItemType Directory -Path $pkg -Force | Out-Null
+          Copy-Item out/* $pkg -Recurse -Force
+          Copy-Item README.md, LICENSE, NOTICE.md $pkg -Force
+          Copy-Item out/python/LICENSE.txt (Join-Path $pkg 'THIRD-PARTY-PYTHON.txt') -Force
+          @'
+          This package contains:
+            WbPet.exe      self-contained .NET 10 (win-x64), no Desktop Runtime needed
+            collector.py   read-only collector
+            python\        Python 3.13 embeddable distribution (PSF license, see THIRD-PARTY-PYTHON.txt)
+
+          Start WbPet.exe. It uses python\pythonw.exe next to the exe.
+          No local database, cache, task data or third-party artwork is included.
+          '@ | Set-Content (Join-Path $pkg 'PACKAGE-README.txt') -Encoding utf8
+          if (Test-Path (Join-Path $pkg 'Assets')) { throw "unexpected Assets folder in package" }
+          Compress-Archive -Path $pkg -DestinationPath "$name.zip" -Force
+          Get-ChildItem "$name.zip" | Select-Object Name, Length | Format-List
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WbPet-win-x64
+          path: WbPet-0.1.0-win-x64.zip
+          retention-days: 30
