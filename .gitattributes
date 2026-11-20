@@ -1,0 +1,2 @@
+# Preserve the exact bytes used by MANIFEST.json, including PowerShell's UTF-8 BOM.
+* -text

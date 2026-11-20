@@ -6,8 +6,8 @@
 
 ## 形象素材
 
-- `Assets/mascot.png`：本仓库自带的**中性占位形象**，原创绘制，随代码以 MIT 发布。
-- `Assets/mascot.local.png`：**不随仓库分发**（已在 `.gitignore` 中）。它是从本机 WorkBuddy 安装目录
+- `app/Assets/mascot.png`：本仓库自带的**中性占位形象**，原创绘制，随代码以 MIT 发布。
+- `app/Assets/mascot.local.png`：**不随仓库分发**（已在 `.gitignore` 中）。它是从本机 WorkBuddy 安装目录
   导出的官方形象，版权归腾讯 / WorkBuddy 所有，仅供本地个人使用。
   如果你把这张图提交到公开仓库，请自行确认授权。
 

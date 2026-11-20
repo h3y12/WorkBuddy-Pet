@@ -2,19 +2,20 @@
 import importlib.util
 import json
 from pathlib import Path
+from contextlib import closing
 import sqlite3
 import tempfile
 import time
 import unittest
 
-spec = importlib.util.spec_from_file_location("wb_collector", Path(__file__).parents[1] / "collector.py")
+spec = importlib.util.spec_from_file_location("wb_collector", Path(__file__).parents[1] / "app" / "collector.py")
 c = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c)
 
 
 class CollectorTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="wb-pet-tests-", ignore_cleanup_errors=True)
+        self.tmp = tempfile.TemporaryDirectory(prefix="wb-pet-tests-")
         self.root = Path(self.tmp.name)
         c.DB_PATH = self.root / "with space # 中文.db"
         c.OUT_DIR = self.root
@@ -24,7 +25,7 @@ class CollectorTests(unittest.TestCase):
         c._audit_state.clear()
         c._audit_day = ""
         self.now = int(time.time() * 1000)
-        with sqlite3.connect(c.DB_PATH) as db:
+        with closing(sqlite3.connect(c.DB_PATH)) as db, db:
             db.executescript("""
                 CREATE TABLE sessions(id TEXT, title TEXT, custom_title TEXT, status TEXT,
                     unread INT, cwd TEXT, model TEXT, created_at INT, updated_at INT,
@@ -41,7 +42,7 @@ class CollectorTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def change_status(self, value):
-        with sqlite3.connect(c.DB_PATH) as db:
+        with closing(sqlite3.connect(c.DB_PATH)) as db, db:
             db.execute("UPDATE sessions SET status=?,updated_at=?", (value, self.now + 1))
 
     def test_readonly_uri_with_spaces_hash_and_unicode(self):

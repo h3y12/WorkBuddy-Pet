@@ -1,15 +1,10 @@
-# 构建产物
-bin/
-obj/
-dist/
-_verify/
-
-# 本地私人素材：WorkBuddy 官方形象，版权不在本项目
-Assets/mascot.local.png
-
-# IDE
-.vs/
-*.user
-*.suo
-__pycache__/
+# Personal artwork and machine data
+**/mascot.local.png
+**/__pycache__/
 *.pyc
+*.pyo
+*.log
+*.tmp
+startup-error.txt
+**/script-startup-error.txt
+dist/
