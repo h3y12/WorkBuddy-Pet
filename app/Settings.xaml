@@ -10,7 +10,10 @@
         <Slider x:Name="OpacitySlider" Margin="0,6,0,16" Minimum="20" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True" />
 
         <TextBlock x:Name="PetLabel" Text="角色大小：100%（40–100）" FontSize="12.5" Foreground="#3C4149" />
-        <Slider x:Name="PetSlider" Margin="0,6,0,6" Minimum="40" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True" />
+        <Slider x:Name="PetSlider" Margin="0,6,0,16" Minimum="40" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True" />
+
+        <TextBlock x:Name="AutoHideLabel" Text="空闲隐藏：30 分钟（1–240）" FontSize="12.5" Foreground="#3C4149" />
+        <Slider x:Name="AutoHideSlider" Margin="0,6,0,6" Minimum="1" Maximum="240" TickFrequency="1" IsSnapToTickEnabled="True" />
 
         <Button Content="完成" Margin="0,18,0,0" Padding="0,6" x:Name="CloseButton" />
     </StackPanel>

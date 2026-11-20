@@ -1,6 +1,6 @@
-# WorkBuddy 桌宠：脚本版 0.3.1
+# WorkBuddy 桌宠：脚本版 0.3.2
 
-0.3.1 修复了进度条比例被取整的问题（26.3% 空条、56% 满条），同时修复面板透明度和角色缩放的同类问题。数字用量的采集与计算方式不变。更新时退出旧桌宠，从新完整包的 Start.vbs 启动一次；托盘版本应显示 0.3.1-script。
+0.3.2 加了自动隐藏：默认 30 分钟没动静就把桌宠收起来，来了新任务或等你确认的请求再自动露面（不抢键盘焦点）。时长在设置里可调 1–240 分钟，右键菜单可整体关掉，开关和时长都写进配置文件。0.3.1 修复的进度条比例、面板透明度、角色缩放取整问题保持不变。更新时退出旧桌宠，从新完整包的 Start.vbs 启动一次；托盘版本应显示 0.3.2-script。
 
 当前主分支使用 Windows PowerShell 5.1 / WPF 界面和 Python 后台采集。之前的 C#/.NET 实现保留在 Git 提交历史中。
 
@@ -8,11 +8,13 @@
 
 1. 先从托盘退出旧版桌宠。
 2. 完整解压 ZIP，双击 Start.vbs。系统禁用 VBS 时可用 Start.cmd。
-3. 首次会复制到当前用户 LocalAppData/Programs/WbPetScript/0.3.1，并创建“WorkBuddy 桌宠（脚本版）”桌面快捷方式。以后从这个快捷方式启动。
+3. 首次会复制到当前用户 LocalAppData/Programs/WbPetScript/0.3.2，并创建“WorkBuddy 桌宠（脚本版）”桌面快捷方式。以后从这个快捷方式启动。
 
 不需要安装 Python、.NET SDK 或运行时，不需要购买签名，不申请管理员权限。自己的界面和采集代码是可阅读的 ps1/py 文件，没有生成自己的 WbPet.exe。随包的 Python 解释器保留供应方签名；SQLite 版本固定为 3.53.4。
 
-功能：现有形象和气泡、任务状态/用量/积分、完成和待确认提醒、缺少 unread 字段兼容、拖动、字号/角色大小/面板透明度、总在最前、显示隐藏与托盘、自动查找启动 WorkBuddy、诊断 ZIP。隐藏时停止动画。普通配置和积分记录沿用原 WbPet 数据目录。WorkBuddy 已运行后关闭时，桌宠会在启动宽限期过后跟随退出；未打开 WorkBuddy 时会显示等待。右键可关闭自动启动 WorkBuddy。
+功能：现有形象和气泡、任务状态/用量/积分、完成和待确认提醒、缺少 unread 字段兼容、拖动、字号/角色大小/面板透明度、总在最前、显示隐藏与托盘、空闲自动隐藏、自动查找启动 WorkBuddy、诊断 ZIP。隐藏时停止动画。普通配置和积分记录沿用原 WbPet 数据目录。WorkBuddy 已运行后关闭时，桌宠会在启动宽限期过后跟随退出；未打开 WorkBuddy 时会显示等待。右键可关闭自动启动 WorkBuddy。
+
+自动隐藏只认两类信号：有任务正在跑，或者有等你确认的请求。这两样都没有、且连续 30 分钟（可调）没变化，桌宠才收起来。任务开跑或冒出新的确认请求时自动露面，用 `ShowActivated = false` 显示，不抢键盘焦点；任务完成、有未读结果的托盘气泡照旧，但不会把桌宠从收起状态弹出来。读数中断、WorkBuddy 没开、正在操作右键菜单时一律不判定，免得因为采不到数误藏或误弹。
 
 脚本版不等于 Windows 免检版。系统策略仍可能禁止脚本或 DLL；未知环境的 SmartScreen/Smart App Control 提示无法保证全部消失。目标电脑需实际验证，不能把本机测试当成跨机认证。不要为此全局关闭防护。
 
@@ -31,6 +33,8 @@ runtime\python.exe -I -S tools\package.py
 ```
 
 打包会生成 SHA256 清单和完整 ZIP。私有形象默认排除；仅个人打包时可显式增加 `--include-local-artwork`，该个人 ZIP 不应上传到公开仓库。
+
+想用官方形象不必互相传图：在目标机器上执行 `powershell -NoProfile -ExecutionPolicy Bypass -File tools\Sync-Mascot.ps1`，它从本机 WorkBuddy 客户端取出官方 mascot，写入 `app\Assets\mascot.local.png`，并同步更新 MANIFEST 里该文件的哈希（不更新哈希，启动器会判包被改而拒绝启动）。脚本自己找安装目录（运行进程 → 卸载注册表 → App Paths → 各盘 Program Files），也可以用 `-InstallRoot` 指定；`-DryRun` 只列候选不写盘；本机没装客户端时用 `-Source <png>` 指定现成图片。写完后从托盘退出旧桌宠，重新跑 Start.vbs。
 
 修改代码后，运行打包命令刷新 MANIFEST.json；启动器会拒绝校验不匹配的源文件。随后退出旧桌宠，从 Start.vbs 重新启动以部署新版。Make-Shortcut.ps1 是可选的原地运行入口，直接指向当前目录。
 

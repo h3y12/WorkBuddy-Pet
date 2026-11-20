@@ -1,7 +1,7 @@
 ﻿param([string]$TargetRoot, [switch]$PrepareOnly)
 $ErrorActionPreference = 'Stop'
 try {
-    if (-not $TargetRoot) { $TargetRoot = Join-Path $env:LOCALAPPDATA 'Programs\WbPetScript\0.3.1' }
+    if (-not $TargetRoot) { $TargetRoot = Join-Path $env:LOCALAPPDATA 'Programs\WbPetScript\0.3.2' }
     $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MANIFEST.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     $sourceRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\') + '\'
     $target = [IO.Path]::GetFullPath($TargetRoot).TrimEnd('\') + '\'
@@ -27,16 +27,9 @@ try {
     [IO.File]::Copy((Join-Path $PSScriptRoot 'MANIFEST.json'), (Join-Path $target 'MANIFEST.json'), $true)
     $python = Join-Path $target 'runtime\pythonw.exe'
     if ($PrepareOnly) { Write-Output $target; return }
-    # Shortcut targets the Windows host, not a newly built executable.
-    try {
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'WorkBuddy 桌宠（脚本版）.lnk'))
-        $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -STA -File "' + (Join-Path $target 'app\Pet.ps1') + '" -Python "' + $python + '"'
-        $shortcut.WorkingDirectory = Join-Path $target 'app'
-        $shortcut.IconLocation = (Join-Path $target 'app\Assets\pet.ico') + ',0'
-        $shortcut.Save()
-    } catch { } # A blocked desktop directory does not prevent running the pet.
+    # Keep shortcut maintenance testable without touching the real desktop.
+    try { & (Join-Path $PSScriptRoot 'tools\Update-Shortcut.ps1') -TargetRoot $target }
+    catch { } # A blocked desktop directory does not prevent running the pet.
     & (Join-Path $target 'app\Pet.ps1') -Python $python
 }
 catch {

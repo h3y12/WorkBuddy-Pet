@@ -9,7 +9,7 @@
 $ErrorActionPreference = 'Stop'
 $script:canWriteTestConfig = $PSBoundParameters.ContainsKey('ConfigPath')
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms, System.Drawing
-$script:version = '0.3.1-script'
+$script:version = '0.3.2-script'
 if (-not $Python) { $Python = Join-Path (Split-Path $PSScriptRoot -Parent) 'runtime\pythonw.exe' }
 if (-not $DataRoot) { $DataRoot = Join-Path $env:LOCALAPPDATA 'WbPet' }
 if (-not $ConfigPath) { $ConfigPath = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'WbPet\config.json' }
@@ -22,7 +22,7 @@ $script:settings = $null
 $script:timer = $null
 $script:mutex = $null
 $script:ui = @{}
-$script:cfg = [ordered]@{Left=0.0;Top=0.0;HasPosition=$false;PetScale=1.0;FontSize=11.0;PanelOpacity=95.0;Topmost=$true;ShowPanel=$true;LaunchWorkBuddy=$true}
+$script:cfg = [ordered]@{Left=0.0;Top=0.0;HasPosition=$false;PetScale=1.0;FontSize=11.0;PanelOpacity=95.0;Topmost=$true;ShowPanel=$true;LaunchWorkBuddy=$true;AutoHide=$true;AutoHideMinutes=30}
 $script:lastSeq = $null
 $script:lastPending = 0
 $script:doneUntil = [DateTime]::MinValue
@@ -33,6 +33,11 @@ $script:misses = 0
 $script:kind = 'offline'
 $script:lastError = ''
 $script:graceUntil = [DateTime]::Now.AddMinutes(2)
+$script:autoActivity = [DateTime]::Now
+$script:autoPrevStatus = ''
+$script:autoPrevPending = 0
+$script:autoPrevTask = ''
+$script:autoPrevRequest = ''
 
 function Field($object, [string]$name, $default = $null) {
     if ($null -eq $object) { return $default }
@@ -93,18 +98,60 @@ function Apply-Configuration {
     $script:window.Topmost=[bool]$script:cfg.Topmost
     $script:ui.MenuTopmost.IsChecked=$script:cfg.Topmost
     $script:ui.MenuLaunchWb.IsChecked=$script:cfg.LaunchWorkBuddy
+    $script:ui.MenuAutoHide.IsChecked=[bool]$script:cfg.AutoHide
     if ($script:cfg.ShowPanel) { $script:ui.Bubble.Visibility='Visible'; $script:ui.MenuTogglePanel.Header='收起状态面板' }
     else { $script:ui.Bubble.Visibility='Collapsed'; $script:ui.MenuTogglePanel.Header='展开状态面板' }
     if ($script:settings) {
         $script:settings.FindName('FontLabel').Text='字号：'+$script:cfg.FontSize
         $script:settings.FindName('OpacityLabel').Text='面板不透明度：'+$script:cfg.PanelOpacity+'%'
         $script:settings.FindName('PetLabel').Text='角色大小：'+[int]($script:cfg.PetScale*100)+'%'
+        $script:settings.FindName('AutoHideLabel').Text='空闲隐藏：'+[int]$script:cfg.AutoHideMinutes+' 分钟（1–240）'
     }
 }
 function Notify([string]$title, [string]$text) {
     if ($script:tray) {
         try { $script:tray.ShowBalloonTip(3000,$title,$text,[System.Windows.Forms.ToolTipIcon]::Info) } catch { }
     }
+}
+function Show-Pet([switch]$Automatic) {
+    $script:autoActivity=[DateTime]::Now
+    $script:window.ShowActivated=-not $Automatic
+    $script:window.Show()
+    if (-not $Automatic) { $script:window.Activate() | Out-Null }
+}
+function Hide-Pet { $script:window.Hide() }
+function Normalize-AutoHideMinutes($value) {
+    $minutes=30.0
+    if (-not [double]::TryParse([string]$value,[ref]$minutes) -or [double]::IsNaN($minutes) -or [double]::IsInfinity($minutes)) { $minutes=30.0 }
+    return [int][Math]::Max(1.0,[Math]::Min(240.0,$minutes))
+}
+function Get-AutoHideAction($state, [DateTime]$now) {
+    if (-not [bool]$script:cfg.AutoHide) { $script:autoActivity=$now; return '' }
+    $ts=[double](Field $state 'ts' 0)
+    $nowMs=[DateTimeOffset]::new($now.ToUniversalTime()).ToUnixTimeMilliseconds()
+    if ($ts -le 0 -or $ts -gt ($nowMs+30000) -or ($nowMs-$ts) -gt 10000 -or (Field $state 'stale' $false) -or (Field $state 'error' '') -or
+        -not (Field $state 'db_ok' $true) -or -not (Field $state 'app_running' $false)) { $script:autoActivity=$now; return '' }
+    $active=Field $state 'active'
+    $status=[string](Field $active 'status' 'idle')
+    $task=[string](Field $active 'id' '')
+    $pending=Field $state 'pending'
+    $count=[int](Field $pending 'count' 0)
+    $request=@((Field $pending 'label' ''),(Field $pending 'since' '')) | ConvertTo-Json -Compress
+    $newTask=($status -eq 'working') -and ($script:autoPrevStatus -ne 'working' -or ($task -and $task -ne $script:autoPrevTask))
+    $newRequest=($count -gt 0) -and ($count -gt $script:autoPrevPending -or $request -ne $script:autoPrevRequest)
+    $script:autoPrevStatus=$status; $script:autoPrevPending=$count
+    $script:autoPrevTask=$task; $script:autoPrevRequest=$request
+    if ($newTask -or $newRequest) { $script:autoActivity=$now; return 'show' }
+    if ($status -eq 'working' -or $count -gt 0) { $script:autoActivity=$now; return '' }
+    if (($now-$script:autoActivity).TotalMinutes -ge [double]$script:cfg.AutoHideMinutes) { return 'hide' }
+    return ''
+}
+function Update-AutoHide($state) {
+    if ($script:ui.Root.ContextMenu.IsOpen -or ($script:settings -and $script:settings.IsVisible) -or
+        ($script:tray -and $script:tray.ContextMenuStrip.Visible)) { $script:autoActivity=[DateTime]::Now; return }
+    $action=Get-AutoHideAction $state ([DateTime]::Now)
+    if ($action -eq 'show') { if (-not $script:window.IsVisible) { Show-Pet -Automatic } }
+    elseif ($action -eq 'hide') { if ($script:window.IsVisible) { Hide-Pet } }
 }
 function Show-State([string]$kind,[string]$label,[string]$title,[string]$usage,[double]$ratio=0,[string]$badge='') {
     $colors=@{working='#2F6FEB';done='#1B8A53';unread='#CC861C';confirm='#CC861C';error='#C64747';idle='#7D838C';offline='#7D838C'}
@@ -224,6 +271,7 @@ function Tick {
         $state=Get-Content -LiteralPath $script:statePath -Raw -Encoding UTF8 | ConvertFrom-Json
         if (-not (Field $state 'error' '') -and -not (Field $state 'stale' $false)) { $script:lastError='' }
         Apply-State $state
+        Update-AutoHide $state
     } catch {
         $script:lastError=$_.Exception.Message
         Show-State 'offline' '读数暂时中断' ('等待恢复：'+$script:lastError) ''
@@ -237,12 +285,15 @@ function Show-Settings {
     $script:fontSlider=$script:settings.FindName('FontSlider')
     $script:opacitySlider=$script:settings.FindName('OpacitySlider')
     $script:petSlider=$script:settings.FindName('PetSlider')
+    $script:autoHideSlider=$script:settings.FindName('AutoHideSlider')
     $script:fontSlider.Value=$script:cfg.FontSize
     $script:opacitySlider.Value=$script:cfg.PanelOpacity
     $script:petSlider.Value=$script:cfg.PetScale*100
+    $script:autoHideSlider.Value=[double]$script:cfg.AutoHideMinutes
     $script:fontSlider.Add_ValueChanged({ $script:cfg.FontSize=$script:fontSlider.Value; Apply-Configuration; Save-Configuration })
     $script:opacitySlider.Add_ValueChanged({ $script:cfg.PanelOpacity=$script:opacitySlider.Value; Apply-Configuration; Save-Configuration })
     $script:petSlider.Add_ValueChanged({ $script:cfg.PetScale=$script:petSlider.Value/100; Apply-Configuration; Save-Configuration })
+    $script:autoHideSlider.Add_ValueChanged({ $script:cfg.AutoHideMinutes=[int]$script:autoHideSlider.Value; $script:autoActivity=[DateTime]::Now; Apply-Configuration; Save-Configuration })
     $script:settings.FindName('CloseButton').Add_Click({ $script:settings.Close() })
     if (-not $Smoke) { $script:settings.Show() }
 }
@@ -302,6 +353,7 @@ try {
             } catch { }
         }
     }
+    $script:cfg.AutoHideMinutes=Normalize-AutoHideMinutes $script:cfg.AutoHideMinutes
     [xml]$markup=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Main.xaml') -Raw -Encoding UTF8
     $script:window=[System.Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($markup))
     foreach ($element in $markup.SelectNodes('//*[@*[local-name()="Name"]]')) {
@@ -363,17 +415,20 @@ try {
         if ($script:kind -ne 'error') { throw 'error event failed' }; $passed.Add('error event')
         if ($Smoke -and $script:canWriteTestConfig) {
             Show-Settings
-            $script:fontSlider.Value=16; $script:opacitySlider.Value=70; $script:petSlider.Value=60
+            $script:fontSlider.Value=16; $script:opacitySlider.Value=70; $script:petSlider.Value=60; $script:autoHideSlider.Value=45
             if ($script:cfg.FontSize -ne 16 -or $script:cfg.PanelOpacity -ne 70 -or [Math]::Abs($script:cfg.PetScale-0.6) -gt 0.001) { throw 'settings controls failed' }
+            if ($script:cfg.AutoHideMinutes -ne 45) { throw 'auto hide slider failed' }
+            if (-not $script:settings.FindName('AutoHideLabel').Text.Contains('45')) { throw 'auto hide label failed' }
+            $passed.Add('auto hide slider 45 min')
             if ([Math]::Abs($script:ui.Bubble.Opacity-0.7) -gt 0.001) { throw 'rendered panel opacity failed' }
             $passed.Add('rendered panel opacity 70%')
             if ([Math]::Abs($script:ui.PetScale.ScaleX-0.6) -gt 0.001 -or [Math]::Abs($script:ui.PetScale.ScaleY-0.6) -gt 0.001) { throw 'rendered pet scale failed' }
             $passed.Add('rendered pet scale 60%')
             $saved=Get-Content -LiteralPath $script:configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ($saved.FontSize -ne 16 -or $saved.PanelOpacity -ne 70) { throw ('settings persistence failed: '+$script:lastError) }
+            if ($saved.FontSize -ne 16 -or $saved.PanelOpacity -ne 70 -or $saved.AutoHideMinutes -ne 45) { throw ('settings persistence failed: '+$script:lastError) }
             $passed.Add('settings sliders and persistence')
             $script:settings.Close(); $script:settings=$null
-            $script:cfg.FontSize=11; $script:cfg.PanelOpacity=95; $script:cfg.PetScale=1; Apply-Configuration
+            $script:cfg.FontSize=11; $script:cfg.PanelOpacity=95; $script:cfg.PetScale=1; $script:cfg.AutoHideMinutes=30; Apply-Configuration
             $diagnosticPath=$script:configPath+'.diagnostic.zip'
             Write-Diagnostics $diagnosticPath
             $archive=[IO.Compression.ZipFile]::OpenRead($diagnosticPath)
@@ -386,6 +441,43 @@ try {
         $testIcon.Dispose(); $passed.Add('tray icon load')
         Stop-Animation
         if ($script:ui.BodyShift.HasAnimatedProperties) { throw 'hidden animation not stopped' }; $passed.Add('hidden animation stops')
+        # 自动隐藏：空闲超时才藏，新任务与待确认自动露面，读数不可用时不判定。
+        $script:cfg.AutoHide=$true; $script:cfg.AutoHideMinutes=30
+        $script:autoActivity=[DateTime]::Now; $script:autoPrevStatus=''; $script:autoPrevPending=0
+        $later=[DateTime]::Now.AddMinutes(31)
+        $laterMs=[DateTimeOffset]::new($later.ToUniversalTime()).ToUnixTimeMilliseconds()
+        $probe=[pscustomobject]@{ts=[DateTimeOffset]::Now.ToUnixTimeMilliseconds();db_ok=$true;app_running=$true;active=[pscustomobject]@{id='probe';title='探针任务';status='idle';unread=0};pending=[pscustomobject]@{count=0;label=''}}
+        if ((Get-AutoHideAction $probe ([DateTime]::Now)) -ne '') { throw 'auto hide: fresh idle should stay visible' }
+        $probe.ts=$laterMs
+        if ((Get-AutoHideAction $probe $later) -ne 'hide') { throw 'auto hide: idle past threshold should hide' }
+        $probe.active.status='working'
+        if ((Get-AutoHideAction $probe $later) -ne 'show') { throw 'auto hide: new task should show the pet' }
+        if ((Get-AutoHideAction $probe $later) -ne '') { throw 'auto hide: running task should keep it visible' }
+        $probe.active.id='next-task'
+        if ((Get-AutoHideAction $probe $later) -ne 'show') { throw 'auto hide: consecutive task should show' }
+        $passed.Add('auto hide consecutive task')
+        $probe.active.status='idle'; $probe.pending.count=1
+        if ((Get-AutoHideAction $probe $later) -ne 'show') { throw 'auto hide: new request should show the pet' }
+        $probe.pending.label='next request'
+        if ((Get-AutoHideAction $probe $later) -ne 'show') { throw 'auto hide: changed request should show' }
+        $passed.Add('auto hide changed request')
+        $probe.pending.count=0
+        $probe | Add-Member -NotePropertyName stale -NotePropertyValue $true
+        if ((Get-AutoHideAction $probe $later) -ne '') { throw 'auto hide: stale samples must not decide' }
+        $probe.PSObject.Properties.Remove('stale')
+        $probe.ts=$laterMs+60000
+        if ((Get-AutoHideAction $probe $later) -ne '') { throw 'auto hide: future sample must not decide' }
+        $probe.ts=$laterMs
+        if ((Get-AutoHideAction $probe $later) -ne '') { throw 'auto hide: invalid period must reset idle timer' }
+        $passed.Add('auto hide invalid timestamps pause timer')
+        foreach ($case in @(@(-1,1),@(999,240),@('bad',30),@('NaN',30),@(45,45))) {
+            if ((Normalize-AutoHideMinutes $case[0]) -ne $case[1]) { throw 'auto hide: invalid duration normalization' }
+        }
+        $passed.Add('auto hide duration normalization')
+        $script:cfg.AutoHide=$false
+        if ((Get-AutoHideAction $probe $later) -ne '') { throw 'auto hide: disabled must not decide' }
+        $script:cfg.AutoHide=$true
+        $passed.Add('auto hide rules')
         $script:doneUntil=[DateTime]::MinValue; $state.active.status='working'; Apply-State $state
         if ($Snapshot) { Save-Snapshot ([IO.Path]::GetFullPath($Snapshot)) }
         $passed | ConvertTo-Json
@@ -399,8 +491,9 @@ try {
     $script:ui.MenuTogglePanel.Add_Click({ $script:cfg.ShowPanel=-not $script:cfg.ShowPanel; Apply-Configuration; Save-Configuration })
     $script:ui.MenuLaunchWb.Add_Click({ $script:cfg.LaunchWorkBuddy=[bool]$script:ui.MenuLaunchWb.IsChecked; Save-Configuration })
     $script:ui.MenuTopmost.Add_Click({ $script:cfg.Topmost=[bool]$script:ui.MenuTopmost.IsChecked; Apply-Configuration; Save-Configuration })
+    $script:ui.MenuAutoHide.Add_Click({ $script:cfg.AutoHide=[bool]$script:ui.MenuAutoHide.IsChecked; $script:autoActivity=[DateTime]::Now; Save-Configuration })
     $script:ui.MenuSettings.Add_Click({ Show-Settings })
-    $script:ui.MenuHide.Add_Click({ $script:window.Hide() })
+    $script:ui.MenuHide.Add_Click({ Hide-Pet })
     $script:ui.MenuExit.Add_Click({ $script:window.Close() })
     $script:ui.MenuExport.Add_Click({ Export-Diagnostics })
     $script:window.Add_IsVisibleChanged({ Apply-Animation })
@@ -424,15 +517,19 @@ try {
     $script:tray.Icon=$script:trayIcon; $script:tray.Text='WorkBuddy 桌宠 '+$script:version
     $trayMenu=[System.Windows.Forms.ContextMenuStrip]::new()
     $trayMenu.Items.Add('版本 '+$script:version).Enabled=$false
-    $show=$trayMenu.Items.Add('显示 / 隐藏'); $show.Add_Click({ if ($script:window.IsVisible) {$script:window.Hide()} else {$script:window.Show();$script:window.Activate() | Out-Null} })
+    $show=$trayMenu.Items.Add('显示 / 隐藏'); $show.Add_Click({ if ($script:window.IsVisible) {Hide-Pet} else {Show-Pet} })
     $export=$trayMenu.Items.Add('导出诊断…'); $export.Add_Click({ Export-Diagnostics })
     $exitItem=$trayMenu.Items.Add('退出'); $exitItem.Add_Click({ $script:window.Close() })
     $script:tray.ContextMenuStrip=$trayMenu; $script:tray.Visible=$true
-    $script:tray.Add_DoubleClick({ $script:window.Show(); $script:window.Activate() | Out-Null })
+    $script:tray.Add_DoubleClick({ Show-Pet })
     $script:timer=[System.Windows.Threading.DispatcherTimer]::new()
     $script:timer.Interval=[TimeSpan]::FromMilliseconds(350)
     $script:timer.Add_Tick({ Tick }); $script:timer.Start()
-    $script:window.ShowDialog() | Out-Null
+    # 不能用 ShowDialog：模态循环遇到 Hide() 会直接返回，收起桌宠等于把进程退掉。
+    # Application.Run 的循环只在窗口 Close 时结束，隐藏/显示都能正常工作。
+    $script:app=[System.Windows.Application]::new()
+    $script:app.ShutdownMode=[System.Windows.ShutdownMode]::OnMainWindowClose
+    $script:app.Run($script:window) | Out-Null
 }
 catch {
     try { [IO.File]::WriteAllText((Join-Path $DataRoot 'script-startup-error.txt'),($_ | Out-String)) } catch { }

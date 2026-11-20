@@ -15,7 +15,7 @@ version=re.search(r"\$script:version = '([^']+)'",(root/'app/Pet.ps1').read_text
 number=version.removesuffix('-script')
 output=args.output_dir.resolve()
 output.mkdir(parents=True,exist_ok=True)
-excluded={'dist','.git','__pycache__'}
+excluded={'dist','.git','.workbuddy','__pycache__'}
 files={}
 for path in sorted(root.rglob('*')):
     relative=path.relative_to(root)

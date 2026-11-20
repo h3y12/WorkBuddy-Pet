@@ -8,3 +8,4 @@
 startup-error.txt
 **/script-startup-error.txt
 dist/
+.workbuddy/

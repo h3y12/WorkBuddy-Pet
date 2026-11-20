@@ -9,9 +9,10 @@
                 <Separator />
                 <MenuItem x:Name="MenuLaunchWb" Header="启动时顺带拉起 WorkBuddy" IsCheckable="True" />
                 <MenuItem x:Name="MenuTopmost" Header="总在最前" IsCheckable="True" IsChecked="True" />
+                <MenuItem x:Name="MenuAutoHide" Header="自动隐藏（有新请求时自动出现）" IsCheckable="True" IsChecked="True" />
                 <MenuItem Header="隐藏到托盘" x:Name="MenuHide" />
                 <MenuItem Header="退出" x:Name="MenuExit" />
-            <Separator /><MenuItem Header="脚本版 0.3.1" IsEnabled="False" /><MenuItem Header="导出诊断…" x:Name="MenuExport" /></ContextMenu>
+            <Separator /><MenuItem Header="脚本版 0.3.2" IsEnabled="False" /><MenuItem Header="导出诊断…" x:Name="MenuExport" /></ContextMenu>
         </Grid.ContextMenu>
 
         <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Center">

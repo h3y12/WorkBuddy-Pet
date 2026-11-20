@@ -19,6 +19,11 @@ jobs:
         run: |
           & runtime/python.exe -I -S -m unittest discover -s tests -p 'test_*.py' -v
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Shortcut and artwork regressions
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File tests/Test-Tools.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: WPF layout and settings checks
         shell: powershell
         run: |
