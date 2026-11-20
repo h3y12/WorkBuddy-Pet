@@ -35,14 +35,14 @@
     "SCRIPT-RUNTIME-NOTICE.md": "3f3b1dced4d69d3aa735a03e930efec72ddcffc659c63ccbeea8ba4101819bdf",
     "Start.cmd": "5710905d7a6e107626869fea8e09194ece74dd31fdbc784913a02279ef37818c",
     "Start.vbs": "31872f9799939df770593d026104042718cc8288db1782cae8e10f72e1456e13",
-    "tests/Test-Tools.ps1": "8a18cb92eed1f69e39f6c4060fe3e6fe0240ddebacf50d785b2422cb933f39ff",
+    "tests/Test-Tools.ps1": "3ba1c192732ad8fc5d74ca6ecdfec51d87d5afe93b0fad246f5b1b70e6ef9f73",
     "tests/Test-Ui.ps1": "511fcda69fc24950b96f3b47bd280349600d4604704483e6051c521cdf3a8052",
     "tests/test_collector.py": "902f2f75fc068e1a2426fd37138f804f790179eb13703024469e70f22a98f6cd",
     "tests/test_worker.py": "0ab8c545dfd6f60038bc8813631904a3075a95019c4f32a52da55a3dc8a5f3b5",
     "THIRD-PARTY-NOTICES.md": "565038b7dd8382ffb8e8c2e7792b29cec81a69c5efc7aebe83aaf478d02aa144",
     "tools/package.py": "917e07aeccf3394febb6bc78a68567bb2d0598b86176bec5d30f45e5fcf44fb1",
     "tools/Sync-Mascot.ps1": "fadeb3b8af5fd4b4025cca29e2d9328fbcb432d612522cb2a511a3a203e57c3c",
-    "tools/Update-Shortcut.ps1": "11499dc46207e060683329c37bbf619d46f6a443a4e8d68e7ebfc848bf9b1464",
-    "VERIFY.md": "b015d037c7256ada1dca84c2cf3e4ef44dc428a3d82dc18b92c96a06a8303e50"
+    "tools/Update-Shortcut.ps1": "3847371d2e5bb27ee040848f05a134db615886cd072985a6b4d941a8d06dc22b",
+    "VERIFY.md": "b132c53a63309a0501fbd9746aa9da746af51c6089fcdb5acf132262ca4b6355"
   }
 }

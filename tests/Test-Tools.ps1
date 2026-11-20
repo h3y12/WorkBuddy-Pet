@@ -9,6 +9,11 @@ $target=Join-Path $temporary 'v1'
 $updater=Join-Path $root 'tools\Update-Shortcut.ps1'
 $sync=Join-Path $root 'tools\Sync-Mascot.ps1'
 $shell=New-Object -ComObject WScript.Shell
+function Read-TestLink($path) {
+    $scratch=Join-Path $temporary 'read-link.lnk'
+    [IO.File]::Copy($path,$scratch,$true)
+    try { return $shell.CreateShortcut($scratch) } finally { [IO.File]::Delete($scratch) }
+}
 function Assert($condition,$message) { if (-not $condition) { throw $message } }
 function Update { & $updater -TargetRoot $target -DesktopPath $desktop -MarkerPath $marker }
 Update
@@ -23,20 +28,22 @@ $moved=Join-Path $folder ([IO.Path]::GetFileName($link))
 $target=Join-Path $temporary 'v2'
 Update
 Assert (-not (Test-Path -LiteralPath $link)) 'Moved shortcut duplicated'
-Assert ($shell.CreateShortcut($moved).Arguments.Contains($target)) 'Moved shortcut did not upgrade'
+Assert ((Read-TestLink $moved).Arguments.Contains($target)) 'Moved shortcut did not upgrade'
 [IO.File]::Delete($moved)
 Update
 $target=Join-Path $temporary 'v3'
 Update
 Assert (-not (Test-Path -LiteralPath $link)) 'Deleted shortcut resurrected'
 [IO.File]::Delete($marker)
-$other=$shell.CreateShortcut($link)
+$ascii=Join-Path $temporary 'other.lnk'
+$other=$shell.CreateShortcut($ascii)
 $other.TargetPath=Join-Path $env:SystemRoot 'notepad.exe'; $other.Save()
+[IO.File]::Copy($ascii,$link,$true)
 Update
-Assert ($shell.CreateShortcut($link).TargetPath -eq $other.TargetPath) 'Unrelated shortcut overwritten'
+Assert ((Read-TestLink $link).TargetPath -eq $other.TargetPath) 'Unrelated shortcut overwritten'
 [IO.File]::WriteAllText($marker,('path='+$link+"`r`n"+'target='+$target))
 Update
-Assert ($shell.CreateShortcut($link).TargetPath -eq $other.TargetPath) 'Replaced marked shortcut overwritten'
+Assert ((Read-TestLink $link).TargetPath -eq $other.TargetPath) 'Replaced marked shortcut overwritten'
 Write-Output 'Shortcut checks passed'
 
 $repo=Join-Path $temporary 'repo'

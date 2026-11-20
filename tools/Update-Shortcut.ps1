@@ -10,15 +10,24 @@ $hostArgs='-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -STA -File "'+
 $hostDir=Join-Path $target 'app'
 $shell=New-Object -ComObject WScript.Shell
 $rootLnk=Join-Path $DesktopPath 'WorkBuddy 桌宠（脚本版）.lnk'
+function Read-Shortcut([string]$path) {
+    # WSH uses the system code page for shortcut filenames on some Windows builds.
+    # Let .NET handle the Unicode filename and give WSH an ASCII scratch name.
+    $scratch=Join-Path ([IO.Path]::GetTempPath()) ('wb-link-'+[guid]::NewGuid().ToString('N')+'.lnk')
+    try {
+        [IO.File]::Copy($path,$scratch,$true)
+        return $shell.CreateShortcut($scratch)
+    } finally { if (Test-Path -LiteralPath $scratch) { [IO.File]::Delete($scratch) } }
+}
 function Is-Current([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
-    $link=$shell.CreateShortcut($path)
+    $link=Read-Shortcut $path
     return ($link.TargetPath -eq $hostExe -and $link.Arguments -eq $hostArgs -and $link.WorkingDirectory -eq $hostDir)
 }
 function Is-PetShortcut([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
     try {
-        $link=$shell.CreateShortcut($path)
+        $link=Read-Shortcut $path
         return ($link.TargetPath -eq $hostExe -and $link.Arguments -match '(?i)-File\s+"[^"\r\n]+[\\/]app[\\/]Pet\.ps1"')
     } catch { return $false }
 }
@@ -53,10 +62,14 @@ if (-not $known -and -not $removed) {
 }
 if ($removed) { return } # Preserve the old marker as the user's deletion preference.
 if ($knownTarget -ne $target -or -not (Is-Current $known)) {
-    $link=$shell.CreateShortcut($known)
-    $link.TargetPath=$hostExe; $link.Arguments=$hostArgs; $link.WorkingDirectory=$hostDir
-    $link.IconLocation=(Join-Path $target 'app\Assets\pet.ico')+',0'
-    $link.Save()
+    $scratch=Join-Path ([IO.Path]::GetTempPath()) ('wb-link-'+[guid]::NewGuid().ToString('N')+'.lnk')
+    try {
+        $link=$shell.CreateShortcut($scratch)
+        $link.TargetPath=$hostExe; $link.Arguments=$hostArgs; $link.WorkingDirectory=$hostDir
+        $link.IconLocation=(Join-Path $target 'app\Assets\pet.ico')+',0'
+        $link.Save()
+        [IO.File]::Copy($scratch,$known,$true)
+    } finally { if (Test-Path -LiteralPath $scratch) { [IO.File]::Delete($scratch) } }
 }
 $content='path='+$known+"`r`n"+'target='+$target+"`r`n"
 $old=''
